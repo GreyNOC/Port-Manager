@@ -52,6 +52,14 @@ if not exist node_modules\.bin\electron.cmd (
   if errorlevel 1 goto install_failed
 )
 
+where GNP >nul 2>nul
+if errorlevel 1 (
+  echo Installing GNP terminal command for this source checkout...
+  echo.
+  call npm run install-cli
+  if errorlevel 1 goto cli_install_failed
+)
+
 echo Starting GreyNOC Port Manager...
 echo.
 call npm start
@@ -64,6 +72,15 @@ echo.
 echo Dependency install failed.
 echo Try running this manually from the project folder:
 echo   npm install
+echo.
+pause
+exit /b 1
+
+:cli_install_failed
+echo.
+echo GNP command install failed.
+echo The desktop app can still run, and the CLI is available with:
+echo   npm run cli -- list
 echo.
 pause
 exit /b 1

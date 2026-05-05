@@ -97,11 +97,18 @@ function printError(message) {
   console.error(`${red('[ERR]')} ${message}`);
 }
 
+function commandPrefix() {
+  if (process.env.GREYNOC_CLI_COMMAND) return process.env.GREYNOC_CLI_COMMAND;
+  if (process.env.npm_lifecycle_event === 'cli') return 'npm run cli --';
+  return 'GNP';
+}
+
 function printHelp() {
+  const prefix = commandPrefix();
   printHeader('Port Manager CLI', 'Local port visibility, timers, and safe shutdown from your terminal.');
   console.log(`
 ${bold('Usage')}
-  ${cyan('GNP')} ${green('<command>')} ${gray('[options]')}
+  ${cyan(prefix)} ${green('<command>')} ${gray('[options]')}
 
 ${bold('Commands')}
   ${green('list, scan')}                 Scan and list local listening ports
@@ -127,16 +134,16 @@ ${bold('Options')}
   ${yellow('--version, -v')}              Show version
 
 ${bold('Examples')}
-  ${gray('GNP list')}
-  ${gray('GNP list --scope localhost --filter vite')}
-  ${gray('GNP stop --pid 1234 --port 5173')}
-  ${gray('GNP timer set --pid 1234 --port 5173 --seconds 300')}
+  ${gray(`${prefix} list`)}
+  ${gray(`${prefix} list --scope localhost --filter vite`)}
+  ${gray(`${prefix} stop --pid 1234 --port 5173`)}
+  ${gray(`${prefix} timer set --pid 1234 --port 5173 --seconds 300`)}
 
 ${bold('Most Used')}
-  ${gray('GNP stop --pid 1234 --port 5173')}
-  ${gray('GNP timer set --pid 1234 --port 5173 --seconds 300')}
-  ${gray('GNP timer list')}
-  ${gray('GNP timer cancel <timer-id>')}
+  ${gray(`${prefix} stop --pid 1234 --port 5173`)}
+  ${gray(`${prefix} timer set --pid 1234 --port 5173 --seconds 300`)}
+  ${gray(`${prefix} timer list`)}
+  ${gray(`${prefix} timer cancel <timer-id>`)}
 `);
 }
 
@@ -302,14 +309,14 @@ function printMostUsedCommands(servers) {
   const target = servers.find((server) => server.stopAllowed) || servers[0];
   const pid = target ? target.pid : '<pid>';
   const port = target ? target.port : '<port>';
-  const commandPrefix = 'GNP';
+  const prefix = commandPrefix();
   const commands = [
-    ['close now', `${commandPrefix} stop --pid ${pid} --port ${port}`],
-    ['close in 5m', `${commandPrefix} timer set --pid ${pid} --port ${port} --seconds 300`],
-    ['timers', `${commandPrefix} timer list`],
-    ['cancel timer', `${commandPrefix} timer cancel <timer-id>`],
-    ['process due', `${commandPrefix} timer run-due`],
-    ['json', `${commandPrefix} list --json`]
+    ['close now', `${prefix} stop --pid ${pid} --port ${port}`],
+    ['close in 5m', `${prefix} timer set --pid ${pid} --port ${port} --seconds 300`],
+    ['timers', `${prefix} timer list`],
+    ['cancel timer', `${prefix} timer cancel <timer-id>`],
+    ['process due', `${prefix} timer run-due`],
+    ['json', `${prefix} list --json`]
   ];
 
   printSection('Most Used Commands');
@@ -453,7 +460,7 @@ async function commandTimer(args, options) {
       printSuccess(`Timer set for ${cyan(`:${result.timer.port}`)} in ${bold(formatDuration(result.timer.seconds))}.`);
       console.log(`${gray('id')} ${result.timer.id}`);
       console.log(`${gray('due')} ${result.timer.dueAt}`);
-      console.log(dim('The desktop app or `GNP timer run-due` must be running to process due timers.'));
+      console.log(dim(`The desktop app or \`${commandPrefix()} timer run-due\` must be running to process due timers.`));
     } else {
       throw new Error(result.error || 'Could not create timer.');
     }

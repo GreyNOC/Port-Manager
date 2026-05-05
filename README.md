@@ -62,6 +62,14 @@ npm run cli -- timer list
 npm run cli -- timer cancel <timer-id>
 ```
 
+To make the short `GNP` command available from PowerShell/CMD, install the local shim once:
+
+```bash
+npm run install-cli
+```
+
+On Windows the launcher also installs this shim automatically if `GNP` is missing. If the current terminal still says `GNP` is not recognized, open a new terminal so `%APPDATA%\npm` is reloaded from `PATH`.
+
 The scan view also prints common copy-paste commands for the first stoppable port it finds:
 
 ```bash
