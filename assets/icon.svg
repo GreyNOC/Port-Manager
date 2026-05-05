@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="GreyNOC Port Manager icon">
+  <defs>
+    <linearGradient id="g" x1="64" x2="448" y1="64" y2="448" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#4f46e5"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#0b1020"/>
+  <rect x="56" y="56" width="400" height="400" rx="84" fill="url(#g)" opacity="0.95"/>
+  <rect x="92" y="104" width="328" height="96" rx="28" fill="#0b1020" opacity="0.9"/>
+  <rect x="92" y="224" width="328" height="96" rx="28" fill="#0b1020" opacity="0.9"/>
+  <rect x="92" y="344" width="328" height="64" rx="28" fill="#0b1020" opacity="0.9"/>
+  <circle cx="144" cy="152" r="18" fill="#22d3ee"/>
+  <circle cx="144" cy="272" r="18" fill="#a5b4fc"/>
+  <circle cx="144" cy="376" r="18" fill="#f8fafc"/>
+  <path d="M190 152h176M190 272h120M190 376h150" stroke="#f8fafc" stroke-width="24" stroke-linecap="round"/>
+</svg>
