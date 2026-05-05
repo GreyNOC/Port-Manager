@@ -54,6 +54,7 @@ From this source checkout:
 
 ```bash
 npm run cli -- list
+npm run cli -- list --scope localhost --filter vite
 npm run cli -- list --json
 npm run cli -- stop --pid 1234 --port 5173
 npm run cli -- timer set --pid 1234 --port 5173 --seconds 300
@@ -61,14 +62,27 @@ npm run cli -- timer list
 npm run cli -- timer cancel <timer-id>
 ```
 
+The scan view also prints common copy-paste commands for the first stoppable port it finds:
+
+```bash
+GNP stop --pid 1234 --port 5173
+GNP timer set --pid 1234 --port 5173 --seconds 300
+GNP timer list
+GNP timer cancel <timer-id>
+GNP timer run-due
+```
+
 After global install or package bin linking, the same commands are available as:
 
 ```bash
+GNP list
 greynoc-port-manager list
 greynoc-ports list
 ```
 
 Stop and timer commands ask for confirmation in interactive shells. Use `--yes` for automation after you have verified the PID and port from `list`.
+
+The CLI uses color automatically in interactive terminals. Use `--no-color` for plain output or `--color` / `GREYNOC_COLOR=1` to force ANSI styling.
 
 The CLI shares the desktop state directory by default:
 
@@ -78,7 +92,7 @@ The CLI shares the desktop state directory by default:
 
 You can override it with `GREYNOC_STATE_DIR=...`.
 
-Timers are processed while the desktop app is running. For terminal-only workflows, run `greynoc-port-manager timer run-due` from a scheduler to process timers that are already due.
+Timers are processed while the desktop app is running. For terminal-only workflows, run `GNP timer run-due` from a scheduler to process timers that are already due.
 
 ## Build desktop installers
 

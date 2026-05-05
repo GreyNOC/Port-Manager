@@ -23,39 +23,120 @@ process.env.GREYNOC_STATE_DIR = process.env.GREYNOC_STATE_DIR || defaultStateDir
 const manager = require('../lib/manager');
 const pkg = require('../package.json');
 
+const rawArgs = process.argv.slice(2);
+let colorEnabled = shouldUseColor(rawArgs);
+
+const ansi = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  cyan: '\x1b[36m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  red: '\x1b[31m',
+  gray: '\x1b[90m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m'
+};
+
+function shouldUseColor(argv) {
+  if (argv.includes('--json') || argv.includes('--no-color') || process.env.NO_COLOR) return false;
+  if (argv.includes('--color') || process.env.FORCE_COLOR || process.env.GREYNOC_COLOR) return true;
+  return Boolean(process.stdout.isTTY);
+}
+
+function color(style, value) {
+  if (!colorEnabled) return String(value);
+  return `${ansi[style] || ''}${value}${ansi.reset}`;
+}
+
+function bold(value) { return color('bold', value); }
+function dim(value) { return color('dim', value); }
+function cyan(value) { return color('cyan', value); }
+function green(value) { return color('green', value); }
+function yellow(value) { return color('yellow', value); }
+function red(value) { return color('red', value); }
+function gray(value) { return color('gray', value); }
+function blue(value) { return color('blue', value); }
+function magenta(value) { return color('magenta', value); }
+
+function stripAnsi(value) {
+  return String(value == null ? '' : value).replace(/\x1b\[[0-9;]*m/g, '');
+}
+
+function visibleLength(value) {
+  return stripAnsi(value).length;
+}
+
+function line(char = '-', width = 84) {
+  console.log(gray(char.repeat(width)));
+}
+
+function printHeader(title, subtitle) {
+  const width = Math.min(96, Math.max(64, process.stdout.columns || 84));
+  line('=', width);
+  console.log(`${bold(cyan('GreyNOC'))} ${bold(title)} ${dim(`v${pkg.version}`)}`);
+  if (subtitle) console.log(dim(subtitle));
+  line('=', width);
+}
+
+function printSection(title) {
+  console.log('');
+  console.log(bold(cyan(title)));
+}
+
+function printSuccess(message) {
+  console.log(`${green('[OK]')} ${message}`);
+}
+
+function printWarn(message) {
+  console.error(`${yellow('[WARN]')} ${message}`);
+}
+
+function printError(message) {
+  console.error(`${red('[ERR]')} ${message}`);
+}
+
 function printHelp() {
-  console.log(`GreyNOC Port Manager CLI
+  printHeader('Port Manager CLI', 'Local port visibility, timers, and safe shutdown from your terminal.');
+  console.log(`
+${bold('Usage')}
+  ${cyan('GNP')} ${green('<command>')} ${gray('[options]')}
 
-Usage:
-  greynoc-port-manager <command> [options]
+${bold('Commands')}
+  ${green('list, scan')}                 Scan and list local listening ports
+  ${green('stop')}                       Stop a local server by PID and port
+  ${green('timer list')}                 List timers
+  ${green('timer set')}                  Set an auto-close timer for a PID and port
+  ${green('timer cancel <id>')}          Cancel a pending timer
+  ${green('timer run-due')}              Process timers that are due now
+  ${green('state-dir')}                  Print the state directory
 
-Commands:
-  list, scan                 Scan and list local listening ports
-  stop                       Stop a local server by PID and port
-  timer list                 List timers
-  timer set                  Set an auto-close timer for a PID and port
-  timer cancel <id>          Cancel a pending timer
-  timer run-due              Process timers that are due now
-  state-dir                  Print the state directory
+${bold('Options')}
+  ${yellow('--json')}                     Print machine-readable JSON
+  ${yellow('--scope <scope>')}            all, localhost, or local-network
+  ${yellow('--filter <text>')}            Filter by process, port, label, address, or command
+  ${yellow('--pid <pid>')}                Target process id
+  ${yellow('--port <port>')}              Target port
+  ${yellow('--key <key>')}                Target key from list output, usually pid:port
+  ${yellow('--command-line <text>')}      Expected command-line snapshot for stop verification
+  ${yellow('--seconds <seconds>')}        Timer duration in seconds
+  ${yellow('--yes, -y')}                  Skip interactive confirmation
+  ${yellow('--color / --no-color')}       Force or disable ANSI color
+  ${yellow('--help, -h')}                 Show help
+  ${yellow('--version, -v')}              Show version
 
-Options:
-  --json                     Print machine-readable JSON
-  --scope <scope>            all, localhost, or local-network
-  --filter <text>            Filter list output by process, port, label, or address
-  --pid <pid>                Target process id
-  --port <port>              Target port
-  --key <key>                Target key from list output, usually pid:port
-  --command-line <text>      Expected command-line snapshot for stop verification
-  --seconds <seconds>        Timer duration in seconds
-  --yes, -y                  Skip interactive confirmation
-  --help, -h                 Show help
-  --version, -v              Show version
+${bold('Examples')}
+  ${gray('GNP list')}
+  ${gray('GNP list --scope localhost --filter vite')}
+  ${gray('GNP stop --pid 1234 --port 5173')}
+  ${gray('GNP timer set --pid 1234 --port 5173 --seconds 300')}
 
-Examples:
-  greynoc-port-manager list
-  greynoc-port-manager list --json
-  greynoc-port-manager stop --pid 1234 --port 5173
-  greynoc-port-manager timer set --pid 1234 --port 5173 --seconds 300
+${bold('Most Used')}
+  ${gray('GNP stop --pid 1234 --port 5173')}
+  ${gray('GNP timer set --pid 1234 --port 5173 --seconds 300')}
+  ${gray('GNP timer list')}
+  ${gray('GNP timer cancel <timer-id>')}
 `);
 }
 
@@ -87,6 +168,14 @@ function parseArgv(argv) {
     }
     if (arg === '-v') {
       result.options.version = true;
+      continue;
+    }
+    if (arg === '--color') {
+      result.options.color = true;
+      continue;
+    }
+    if (arg === '--no-color') {
+      result.options['no-color'] = true;
       continue;
     }
     const next = argv[i + 1];
@@ -143,7 +232,25 @@ function filterServers(servers, options) {
 }
 
 function pad(value, width) {
-  return String(value == null ? '' : value).padEnd(width).slice(0, width);
+  const text = String(value == null ? '' : value);
+  const cleanLength = visibleLength(text);
+  if (cleanLength >= width) return truncate(text, width);
+  return text + ' '.repeat(width - cleanLength);
+}
+
+function truncate(value, width) {
+  const text = String(value == null ? '' : value);
+  if (visibleLength(text) <= width) return text;
+  const clean = stripAnsi(text);
+  if (width <= 1) return clean.slice(0, width);
+  return `${clean.slice(0, width - 1)}~`;
+}
+
+function right(value, width) {
+  const text = String(value == null ? '' : value);
+  const cleanLength = visibleLength(text);
+  if (cleanLength >= width) return truncate(text, width);
+  return ' '.repeat(width - cleanLength) + text;
 }
 
 function formatDuration(seconds) {
@@ -158,33 +265,95 @@ function formatDuration(seconds) {
   return `${secs}s`;
 }
 
+function formatClock(value) {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--';
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+}
+
+function formatScope(scope) {
+  if (scope === 'localhost') return green('localhost');
+  if (scope === 'local-network') return blue('network');
+  return yellow(scope || 'unknown');
+}
+
+function statusBadge(server) {
+  if (server.protected) return yellow('[protected]');
+  if (server.ownedByCurrentUser === false) return yellow('[other user]');
+  if (server.stopAllowed) return green('[stoppable]');
+  return gray('[locked]');
+}
+
+function printSummary(data, servers) {
+  const summary = data.summary || {};
+  const total = Number.isFinite(Number(summary.active)) ? Number(summary.active) : servers.length;
+  const cards = [
+    ['shown', `${servers.length}/${total}`],
+    ['localhost', servers.filter((server) => server.scope === 'localhost').length],
+    ['network', servers.filter((server) => server.scope === 'local-network').length],
+    ['timers', summary.timers || 0],
+    ['scan', formatClock(data.scannedAt)]
+  ];
+  console.log(cards.map(([label, value]) => `${gray(label)} ${bold(value)}`).join(gray('  |  ')));
+}
+
+function printMostUsedCommands(servers) {
+  const target = servers.find((server) => server.stopAllowed) || servers[0];
+  const pid = target ? target.pid : '<pid>';
+  const port = target ? target.port : '<port>';
+  const commandPrefix = 'GNP';
+  const commands = [
+    ['close now', `${commandPrefix} stop --pid ${pid} --port ${port}`],
+    ['close in 5m', `${commandPrefix} timer set --pid ${pid} --port ${port} --seconds 300`],
+    ['timers', `${commandPrefix} timer list`],
+    ['cancel timer', `${commandPrefix} timer cancel <timer-id>`],
+    ['process due', `${commandPrefix} timer run-due`],
+    ['json', `${commandPrefix} list --json`]
+  ];
+
+  printSection('Most Used Commands');
+  for (const [label, command] of commands) {
+    console.log(`  ${pad(gray(label), 12)} ${cyan(command)}`);
+  }
+}
+
 function printServers(data, options) {
   const servers = filterServers(data.servers || [], options);
   if (options.json) {
     console.log(JSON.stringify({ ...data, servers }, null, 2));
     return;
   }
+  printHeader('Port Scan', 'Listening localhost and local-network services.');
+  printSummary(data, servers);
+  printMostUsedCommands(servers);
   if (!servers.length) {
-    console.log('No local listening ports found.');
+    console.log('');
+    console.log(`${yellow('[EMPTY]')} No local listening ports found.`);
     return;
   }
-  console.log(`${servers.length} local listening port${servers.length === 1 ? '' : 's'} found`);
-  console.log('');
-  console.log(`${pad('PORT', 7)} ${pad('PID', 8)} ${pad('SCOPE', 14)} ${pad('ALIVE', 9)} ${pad('PROCESS', 18)} LABEL`);
+
+  printSection(`${servers.length} Local Listening Port${servers.length === 1 ? '' : 's'}`);
+  console.log(`${pad(gray('PORT'), 8)} ${pad(gray('PID'), 8)} ${pad(gray('SCOPE'), 10)} ${pad(gray('ALIVE'), 9)} ${pad(gray('STATUS'), 13)} ${pad(gray('PROCESS'), 20)} ${gray('LABEL')}`);
+  console.log(gray('-'.repeat(96)));
   for (const server of servers) {
     console.log([
-      pad(`:${server.port}`, 7),
-      pad(server.pid, 8),
-      pad(server.scope, 14),
+      pad(cyan(`:${server.port}`), 8),
+      right(server.pid, 8),
+      pad(formatScope(server.scope), 10),
       pad(formatDuration(server.aliveSeconds), 9),
-      pad(server.processName, 18),
-      server.label || ''
+      pad(statusBadge(server), 13),
+      pad(server.processName, 20),
+      bold(server.label || 'Local server')
     ].join(' '));
-    console.log(`  key=${server.key} addresses=${(server.addresses || []).join(', ')} stopAllowed=${server.stopAllowed ? 'yes' : 'no'}`);
-    if (server.commandLine) console.log(`  command=${server.commandLine}`);
+    const addresses = (server.addresses || []).join(', ') || '--';
+    console.log(`  ${gray('key')} ${server.key}  ${gray('addr')} ${addresses}`);
+    if (server.commandLine) {
+      console.log(`  ${gray('cmd')} ${dim(truncate(server.commandLine, 110))}`);
+    }
   }
   if (data.errors && data.errors.length) {
-    console.error(`Scanner warnings: ${data.errors.join(' | ')}`);
+    printWarn(`Scanner warnings: ${data.errors.join(' | ')}`);
   }
 }
 
@@ -193,20 +362,27 @@ function printTimers(timers, json) {
     console.log(JSON.stringify({ timers }, null, 2));
     return;
   }
+  printHeader('Timers', 'Auto-close timers for selected local services.');
   if (!timers.length) {
-    console.log('No timers found.');
+    console.log('');
+    console.log(`${yellow('[EMPTY]')} No timers found.`);
     return;
   }
-  console.log(`${pad('STATUS', 15)} ${pad('DUE', 24)} ${pad('PORT', 7)} ${pad('PID', 8)} ID`);
+  console.log(`${pad(gray('STATUS'), 15)} ${pad(gray('DUE'), 24)} ${pad(gray('LEFT'), 10)} ${pad(gray('PORT'), 8)} ${pad(gray('PID'), 8)} ${gray('ID')}`);
+  console.log(gray('-'.repeat(94)));
   for (const timer of timers) {
+    const remainingSeconds = Math.max(0, Math.floor((Date.parse(timer.dueAt) - Date.now()) / 1000));
+    const status = timer.status === 'pending' ? green(timer.status) : gray(timer.status);
     console.log([
-      pad(timer.status, 15),
+      pad(status, 15),
       pad(timer.dueAt || '', 24),
-      pad(`:${timer.port}`, 7),
-      pad(timer.pid, 8),
+      pad(timer.status === 'pending' ? formatDuration(remainingSeconds) : '--', 10),
+      pad(cyan(`:${timer.port}`), 8),
+      right(timer.pid, 8),
       timer.id
     ].join(' '));
-    if (timer.result) console.log(`  result=${timer.result}`);
+    console.log(`  ${gray('target')} ${timer.processName || 'unknown'} ${gray('on')} ${timer.label || 'Local server'}`);
+    if (timer.result) console.log(`  ${gray('result')} ${timer.result}`);
   }
 }
 
@@ -217,7 +393,7 @@ async function confirm(options, message) {
   }
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answer = await rl.question(`${message} Type yes to continue: `);
+    const answer = await rl.question(`${yellow('[CONFIRM]')} ${message} ${gray('Type yes to continue: ')}`);
     return answer.trim().toLowerCase() === 'yes';
   } finally {
     rl.close();
@@ -234,7 +410,7 @@ async function commandStop(options) {
   if (!request.pid || !request.port) throw new Error('stop requires --pid and --port.');
   const ok = await confirm(options, `Stop PID ${request.pid} on port ${request.port}?`);
   if (!ok) {
-    console.log('Cancelled.');
+    console.log(gray('Cancelled.'));
     return;
   }
   const result = await manager.stopServer(request, 'manual');
@@ -242,7 +418,11 @@ async function commandStop(options) {
   if (options.json) {
     console.log(JSON.stringify(result, null, 2));
   } else if (result.ok) {
-    console.log(result.message);
+    printHeader('Stop Request', 'A SIGTERM request was sent after re-validating the selected process.');
+    printSuccess(result.message);
+    if (result.stopped) {
+      console.log(`${gray('target')} ${cyan(`:${result.stopped.port}`)} ${gray('pid')} ${result.stopped.pid} ${gray('process')} ${result.stopped.processName}`);
+    }
   } else {
     throw new Error(result.error || 'Could not stop selected server.');
   }
@@ -262,16 +442,18 @@ async function commandTimer(args, options) {
     }
     const ok = await confirm(options, `Set a ${formatDuration(request.seconds)} auto-close timer for PID ${request.pid} on port ${request.port}?`);
     if (!ok) {
-      console.log('Cancelled.');
+      console.log(gray('Cancelled.'));
       return;
     }
     const result = await manager.createTimer(request);
     if (options.json) {
       console.log(JSON.stringify(result, null, 2));
     } else if (result.ok) {
-      console.log(`Timer set: ${result.timer.id}`);
-      console.log(`Due at: ${result.timer.dueAt}`);
-      console.log('The desktop app or `greynoc-port-manager timer run-due` must be running to process due timers.');
+      printHeader('Timer Set', 'Auto-close timer saved for the selected local service.');
+      printSuccess(`Timer set for ${cyan(`:${result.timer.port}`)} in ${bold(formatDuration(result.timer.seconds))}.`);
+      console.log(`${gray('id')} ${result.timer.id}`);
+      console.log(`${gray('due')} ${result.timer.dueAt}`);
+      console.log(dim('The desktop app or `GNP timer run-due` must be running to process due timers.'));
     } else {
       throw new Error(result.error || 'Could not create timer.');
     }
@@ -285,7 +467,8 @@ async function commandTimer(args, options) {
     if (options.json) {
       console.log(JSON.stringify(result, null, 2));
     } else if (result.ok) {
-      console.log(`Timer cancelled: ${result.timer.id}`);
+      printHeader('Timer Cancelled', 'Pending timer was marked cancelled.');
+      printSuccess(result.timer.id);
     } else {
       throw new Error(result.error || 'Could not cancel timer.');
     }
@@ -297,7 +480,8 @@ async function commandTimer(args, options) {
     if (options.json) {
       console.log(JSON.stringify({ ok: true }, null, 2));
     } else {
-      console.log('Due timers processed.');
+      printHeader('Timer Sweep', 'Checked pending timers and processed anything due.');
+      printSuccess('Due timers processed.');
     }
     return;
   }
@@ -335,13 +519,18 @@ async function main() {
     return;
   }
   if (command === 'state-dir') {
-    console.log(process.env.GREYNOC_STATE_DIR);
+    if (options.json) {
+      console.log(JSON.stringify({ stateDir: process.env.GREYNOC_STATE_DIR }, null, 2));
+    } else {
+      printHeader('State Directory', 'Shared state used by the desktop app and CLI.');
+      console.log(process.env.GREYNOC_STATE_DIR);
+    }
     return;
   }
   throw new Error(`Unknown command: ${command}`);
 }
 
 main().catch((error) => {
-  console.error(`Error: ${error.message}`);
+  printError(error.message);
   process.exitCode = 1;
 });

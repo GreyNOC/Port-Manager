@@ -4,6 +4,7 @@
   "description": "Standalone Electron desktop utility for viewing localhost ports, tracking server uptime, and safely stopping selected local dev servers.",
   "main": "electron/main.js",
   "bin": {
+    "GNP": "bin/greynoc-port-manager.js",
     "greynoc-port-manager": "bin/greynoc-port-manager.js",
     "greynoc-ports": "bin/greynoc-port-manager.js"
   },
