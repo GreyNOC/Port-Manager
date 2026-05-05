@@ -46,6 +46,40 @@ npm start
 
 On Windows you can also double-click `run-electron.bat`. The launcher checks for Node.js / npm, installs dependencies if `node_modules` is missing, then starts the app.
 
+## Use the CLI
+
+The app also ships a dependency-free Node CLI that uses the same scanner, state, stop checks, and timer logic as the desktop app.
+
+From this source checkout:
+
+```bash
+npm run cli -- list
+npm run cli -- list --json
+npm run cli -- stop --pid 1234 --port 5173
+npm run cli -- timer set --pid 1234 --port 5173 --seconds 300
+npm run cli -- timer list
+npm run cli -- timer cancel <timer-id>
+```
+
+After global install or package bin linking, the same commands are available as:
+
+```bash
+greynoc-port-manager list
+greynoc-ports list
+```
+
+Stop and timer commands ask for confirmation in interactive shells. Use `--yes` for automation after you have verified the PID and port from `list`.
+
+The CLI shares the desktop state directory by default:
+
+- Windows: `%APPDATA%\GreyNOC Port Manager\state`
+- macOS: `~/Library/Application Support/GreyNOC Port Manager/state`
+- Linux: `$XDG_CONFIG_HOME/GreyNOC Port Manager/state` or `~/.config/GreyNOC Port Manager/state`
+
+You can override it with `GREYNOC_STATE_DIR=...`.
+
+Timers are processed while the desktop app is running. For terminal-only workflows, run `greynoc-port-manager timer run-due` from a scheduler to process timers that are already due.
+
 ## Build desktop installers
 
 ```bash
