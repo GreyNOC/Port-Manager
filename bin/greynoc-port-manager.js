@@ -529,7 +529,7 @@ async function commandStop(options) {
   }
   const manager = getManager();
   const result = await manager.stopServer(request, 'manual');
-  await manager.refreshScan().catch(() => {});
+  manager.refreshScan().catch(() => {});
   if (options.json) {
     console.log(JSON.stringify(result, null, 2));
   } else if (result.ok) {

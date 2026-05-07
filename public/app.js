@@ -245,28 +245,36 @@ function renderTimers() {
   }
 }
 
-async function loadPorts(silent = false) {
+async function applyPortData(data, silent = false) {
+  if (data && data.ok === false) throw new Error(data.error || 'Scan failed.');
+  const previousKeys = new Set(state.ports.map((server) => server.key));
+  state.ports = data.servers || [];
+
+  for (const server of state.ports) {
+    if (!previousKeys.has(server.key) && !state.seenKeys.has(server.key)) {
+      state.seenKeys.add(server.key);
+      log(`New local server detected on :${server.port} (${server.processName}, PID ${server.pid}).`, 'success');
+      notify('New local server detected', `:${server.port} ${server.processName}`);
+    }
+  }
+
+  renderStats(data.summary || {}, data.scannedAt);
+  renderPorts();
+  await loadTimers(true);
+  elements.scanStatus.textContent = `Watching ${state.ports.length} local server${state.ports.length === 1 ? '' : 's'} from the main process background scan.`;
+  const warnings = [...(data.warnings || []), ...(data.errors || [])];
+  if (warnings.length && !silent) {
+    log(`Scanner warnings: ${warnings.join(' | ')}`, 'error');
+  }
+}
+
+async function loadPorts(silent = false, refresh = false) {
   try {
-    elements.scanStatus.textContent = 'Scanning local ports...';
-    const data = await api.listPorts();
-    const previousKeys = new Set(state.ports.map((server) => server.key));
-    state.ports = data.servers || [];
-
-    for (const server of state.ports) {
-      if (!previousKeys.has(server.key) && !state.seenKeys.has(server.key)) {
-        state.seenKeys.add(server.key);
-        log(`New local server detected on :${server.port} (${server.processName}, PID ${server.pid}).`, 'success');
-        notify('New local server detected', `:${server.port} ${server.processName}`);
-      }
-    }
-
-    renderStats(data.summary || {}, data.scannedAt);
-    renderPorts();
-    await loadTimers(true);
-    elements.scanStatus.textContent = `Watching ${state.ports.length} local server${state.ports.length === 1 ? '' : 's'} every 3 seconds.`;
-    if (data.errors && data.errors.length && !silent) {
-      log(`Scanner warnings: ${data.errors.join(' | ')}`, 'error');
-    }
+    elements.scanStatus.textContent = refresh ? 'Refreshing local ports...' : 'Loading latest scan...';
+    const data = refresh && api.refreshPorts
+      ? await api.refreshPorts()
+      : await (api.getLatestPorts ? api.getLatestPorts() : api.listPorts());
+    await applyPortData(data, silent);
   } catch (error) {
     elements.scanStatus.textContent = 'Scan failed.';
     log(error.message || String(error), 'error');
@@ -330,8 +338,8 @@ async function stopServer(server) {
     log(result.error || 'Could not stop selected local server.', 'error');
     return;
   }
-  log(result.message || `Stop request sent for :${server.port}.`, 'success');
-  await loadPorts(true);
+  log(result.message || `Stop result: ${result.status || 'sent'} for :${server.port}.`, result.status === 'signal-sent-still-running' ? 'error' : 'success');
+  await loadPorts(true, false);
 }
 
 async function cancelTimer(timerId) {
@@ -346,7 +354,7 @@ async function cancelTimer(timerId) {
 }
 
 function wireEvents() {
-  elements.refreshBtn.addEventListener('click', () => loadPorts(false));
+  elements.refreshBtn.addEventListener('click', () => loadPorts(false, true));
   elements.filterInput.addEventListener('input', renderPorts);
   elements.scopeFilter.addEventListener('change', renderPorts);
   elements.timerPreset.addEventListener('change', () => {
@@ -369,12 +377,15 @@ function wireEvents() {
     );
   });
 
-  api.onRefreshRequest(() => loadPorts(false));
+  api.onRefreshRequest(() => loadPorts(false, true));
+  if (api.onPortsUpdated) {
+    api.onPortsUpdated((data) => applyPortData(data, true));
+  }
 }
 
 wireEvents();
-loadPorts(false);
-setInterval(() => loadPorts(true), 3000);
+loadPorts(false, false);
+setInterval(() => loadPorts(true, false), 3000);
 setInterval(() => {
   renderPorts();
   renderTimers();

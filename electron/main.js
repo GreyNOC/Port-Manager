@@ -41,7 +41,9 @@ function createAppMenu() {
         {
           label: 'Refresh Ports',
           accelerator: 'CmdOrCtrl+R',
-          click: () => mainWindow?.webContents.send('ports:refresh-request')
+          click: () => {
+            mainWindow?.webContents.send('ports:refresh-request');
+          }
         },
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' }
@@ -72,41 +74,78 @@ function createAppMenu() {
 }
 
 function registerIpcHandlers() {
-  ipcMain.handle('ports:list', async () => {
+  const handle = (channel, fn) => {
+    ipcMain.handle(channel, async (event, ...args) => {
+      try {
+        validateSender(event);
+        return await fn(event, ...args);
+      } catch (error) {
+        return normalizeIpcError(error);
+      }
+    });
+  };
+
+  handle('ports:list', async () => {
+    return manager.getLastScan();
+  });
+
+  handle('ports:getLatest', async () => {
+    return manager.getLastScan();
+  });
+
+  handle('ports:refresh', async () => {
     return manager.refreshScan();
   });
 
-  ipcMain.handle('timers:list', async () => {
+  handle('timers:list', async () => {
     return { timers: manager.listTimers() };
   });
 
-  ipcMain.handle('server:stop', async (_event, request) => {
+  handle('server:stop', async (_event, request) => {
     const result = await manager.stopServer(sanitizeRequest(request), 'manual');
-    await manager.refreshScan().catch(() => {});
+    manager.refreshScan().catch(() => {});
     return result;
   });
 
-  ipcMain.handle('timer:create', async (_event, request) => {
+  handle('timer:create', async (_event, request) => {
     return manager.createTimer(sanitizeRequest(request));
   });
 
-  ipcMain.handle('timer:cancel', async (_event, timerId) => {
-    return manager.cancelTimer(typeof timerId === 'string' ? timerId : '');
+  handle('timer:cancel', async (_event, timerId) => {
+    return manager.cancelTimer(validateTimerId(timerId));
   });
 
-  ipcMain.handle('dialog:confirm', async (_event, options) => {
+  handle('dialog:confirm', async (_event, options) => {
     const safe = options && typeof options === 'object' ? options : {};
     const choice = await dialog.showMessageBox(mainWindow, {
       type: 'question',
       buttons: ['Cancel', 'Confirm'],
       defaultId: 0,
       cancelId: 0,
-      title: String(safe.title || 'Confirm'),
-      message: String(safe.message || 'Are you sure?'),
-      detail: safe.detail ? String(safe.detail) : undefined
+      title: capText(safe.title || 'Confirm', 80),
+      message: capText(safe.message || 'Are you sure?', 180),
+      detail: safe.detail ? capText(safe.detail, 1200) : undefined
     });
     return choice.response === 1;
   });
+}
+
+function validateSender(event) {
+  if (!mainWindow || event.sender !== mainWindow.webContents) {
+    throw new Error('Rejected IPC message from an unexpected sender.');
+  }
+}
+
+function normalizeIpcError(error) {
+  return {
+    ok: false,
+    status: 'failed',
+    error: error && error.message ? error.message : 'IPC request failed.'
+  };
+}
+
+function capText(value, maxLength) {
+  return String(value == null ? '' : value).replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, maxLength);
 }
 
 function toFiniteInt(value) {
@@ -114,18 +153,31 @@ function toFiniteInt(value) {
   return Number.isFinite(n) && Number.isInteger(n) ? n : undefined;
 }
 
+function validateTimerId(value) {
+  if (typeof value !== 'string') return '';
+  return /^[a-f0-9-]{1,64}$/i.test(value) ? value : '';
+}
+
 function sanitizeRequest(request) {
   if (!request || typeof request !== 'object') return {};
-  const key = typeof request.key === 'string' ? request.key.slice(0, 64) : undefined;
+  const key = typeof request.key === 'string' && /^[0-9]{1,10}:[0-9]{1,5}$/.test(request.key)
+    ? request.key
+    : undefined;
   const commandLine = typeof request.commandLine === 'string'
-    ? request.commandLine.slice(0, 4096)
+    ? capText(request.commandLine, 4096)
+    : undefined;
+  const commandLineHash = typeof request.commandLineHash === 'string' && /^[a-f0-9]{64}$/i.test(request.commandLineHash)
+    ? request.commandLineHash.toLowerCase()
     : undefined;
   const seconds = request.seconds !== undefined ? Number(request.seconds) : undefined;
+  const pid = toFiniteInt(request.pid);
+  const port = toFiniteInt(request.port);
   return {
     key,
-    pid: toFiniteInt(request.pid),
-    port: toFiniteInt(request.port),
+    pid: pid && pid > 0 && pid <= 0xffffffff ? pid : undefined,
+    port: port && port > 0 && port <= 65535 ? port : undefined,
     commandLine,
+    commandLineHash,
     seconds: Number.isFinite(seconds) ? seconds : undefined
   };
 }
@@ -175,6 +227,8 @@ async function createWindow() {
       webSecurity: true,
       allowRunningInsecureContent: false,
       experimentalFeatures: false,
+      enableWebSQL: false,
+      navigateOnDragDrop: false,
       devTools: isDev,
       spellcheck: false
     }
@@ -227,7 +281,7 @@ async function boot() {
       event.preventDefault();
     });
     contents.session.setPermissionRequestHandler((_wc, permission, callback) => {
-      const allowed = new Set(['notifications', 'clipboard-sanitized-write']);
+      const allowed = new Set(['notifications']);
       callback(allowed.has(permission));
     });
   });
@@ -241,6 +295,10 @@ async function boot() {
 
   applyContentSecurityPolicy();
   registerIpcHandlers();
+  manager.onScanUpdated((data) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send('ports:updated', data);
+  });
 
   try {
     await manager.refreshScan();
