@@ -20,11 +20,16 @@ function defaultStateDir() {
 
 process.env.GREYNOC_STATE_DIR = process.env.GREYNOC_STATE_DIR || defaultStateDir();
 
-const manager = require('../lib/manager');
+let managerInstance = null;
+function getManager() {
+  if (!managerInstance) managerInstance = require('../lib/manager');
+  return managerInstance;
+}
 const pkg = require('../package.json');
 
 const rawArgs = process.argv.slice(2);
 let colorEnabled = shouldUseColor(rawArgs);
+let shellMode = false;
 
 const ansi = {
   reset: '\x1b[0m',
@@ -98,53 +103,94 @@ function printError(message) {
 }
 
 function commandPrefix() {
+  if (shellMode) return '';
   if (process.env.GREYNOC_CLI_COMMAND) return process.env.GREYNOC_CLI_COMMAND;
   if (process.env.npm_lifecycle_event === 'cli') return 'npm run cli --';
   return 'GNP';
 }
 
-function printHelp() {
+function commandExample(command) {
   const prefix = commandPrefix();
-  printHeader('Port Manager CLI', 'Local port visibility, timers, and safe shutdown from your terminal.');
+  return prefix ? `${prefix} ${command}` : command;
+}
+
+function printHelp() {
+  console.log(`${bold(cyan('GreyNOC'))} ${bold('Port Manager')} ${dim(`v${pkg.version}`)}`);
   console.log(`
 ${bold('Usage')}
-  ${cyan(prefix)} ${green('<command>')} ${gray('[options]')}
+  ${cyan(commandExample('<command>'))} ${gray('[target] [time] [options]')}
 
 ${bold('Commands')}
-  ${green('list, scan')}                 Scan and list local listening ports
-  ${green('stop')}                       Stop a local server by PID and port
-  ${green('timer list')}                 List timers
-  ${green('timer set')}                  Set an auto-close timer for a PID and port
-  ${green('timer cancel <id>')}          Cancel a pending timer
-  ${green('timer run-due')}              Process timers that are due now
-  ${green('state-dir')}                  Print the state directory
+  ${green('list')}                       Show ports
+  ${green('stop <port>')}                Stop a port
+  ${green('timer <port> <time>')}        Set timer
+  ${green('timers')}                     Show timers
+  ${green('cancel <id>')}                Cancel timer
+  ${green('run-due')}                    Process due timers
+  ${green('state-dir')}                  Show state path
 
 ${bold('Options')}
   ${yellow('--json')}                     Print machine-readable JSON
   ${yellow('--scope <scope>')}            all, localhost, or local-network
   ${yellow('--filter <text>')}            Filter by process, port, label, address, or command
+  ${yellow('--verbose')}                  Show address and command details
   ${yellow('--pid <pid>')}                Target process id
   ${yellow('--port <port>')}              Target port
-  ${yellow('--key <key>')}                Target key from list output, usually pid:port
+  ${yellow('--key <key>')}                Target key, usually pid:port
   ${yellow('--command-line <text>')}      Expected command-line snapshot for stop verification
-  ${yellow('--seconds <seconds>')}        Timer duration in seconds
+  ${yellow('--seconds <duration>')}       Timer duration, like 300, 5m, or 1h
   ${yellow('--yes, -y')}                  Skip interactive confirmation
   ${yellow('--color / --no-color')}       Force or disable ANSI color
   ${yellow('--help, -h')}                 Show help
   ${yellow('--version, -v')}              Show version
 
 ${bold('Examples')}
-  ${gray(`${prefix} list`)}
-  ${gray(`${prefix} list --scope localhost --filter vite`)}
-  ${gray(`${prefix} stop --pid 1234 --port 5173`)}
-  ${gray(`${prefix} timer set --pid 1234 --port 5173 --seconds 300`)}
-
-${bold('Most Used')}
-  ${gray(`${prefix} stop --pid 1234 --port 5173`)}
-  ${gray(`${prefix} timer set --pid 1234 --port 5173 --seconds 300`)}
-  ${gray(`${prefix} timer list`)}
-  ${gray(`${prefix} timer cancel <timer-id>`)}
+  ${gray(commandExample('list'))}
+  ${gray(commandExample('stop 5173'))}
+  ${gray(commandExample('timer 5173 5m'))}
+  ${gray(commandExample('timer list'))}
+  ${gray(commandExample('timer cancel <timer-id>'))}
 `);
+}
+
+function splitCommandLine(input) {
+  const args = [];
+  let current = '';
+  let quote = null;
+  let escaped = false;
+
+  for (const char of String(input || '')) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        args.push(current);
+        current = '';
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (escaped) current += '\\';
+  if (quote) throw new Error(`Unclosed ${quote} quote.`);
+  if (current) args.push(current);
+  return args;
 }
 
 function parseArgv(argv) {
@@ -205,13 +251,71 @@ function toInt(value, label) {
   return n;
 }
 
+function parseDurationSeconds(value, label = 'Seconds') {
+  const text = String(value == null ? '' : value).trim().toLowerCase();
+  const match = text.match(/^(\d+(?:\.\d+)?)(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)?$/);
+  if (!match) throw new Error(`${label} must be a duration like 300, 5m, or 1h.`);
+  const amount = Number(match[1]);
+  const unit = match[2] || 's';
+  const scale = unit.startsWith('d') ? 86400
+    : unit.startsWith('h') ? 3600
+      : unit.startsWith('m') ? 60
+        : 1;
+  return amount * scale;
+}
+
+function applyTargetToken(request, token) {
+  if (!token) return request;
+  const text = String(token).trim();
+  const keyMatch = text.match(/^(\d+):(\d+)$/);
+  if (keyMatch) {
+    request.pid = request.pid || toInt(keyMatch[1], 'PID');
+    request.port = request.port || toInt(keyMatch[2], 'Port');
+    request.key = request.key || text;
+    return request;
+  }
+  const portMatch = text.match(/^:?(\d+)$/);
+  if (portMatch) {
+    request.port = request.port || toInt(portMatch[1], 'Port');
+  }
+  return request;
+}
+
 function buildRequest(options) {
   const request = {};
   if (options.pid !== undefined) request.pid = toInt(options.pid, 'PID');
   if (options.port !== undefined) request.port = toInt(options.port, 'Port');
   if (options.key !== undefined) request.key = String(options.key);
   if (options['command-line'] !== undefined) request.commandLine = String(options['command-line']);
-  if (options.seconds !== undefined) request.seconds = Number(options.seconds);
+  if (options.seconds !== undefined) request.seconds = parseDurationSeconds(options.seconds);
+  return request;
+}
+
+async function resolveTarget(request) {
+  if (request.pid && request.port) return request;
+  if (!request.port) return request;
+
+  const scan = await getManager().refreshScan();
+  const matches = (scan.servers || []).filter((server) => server.port === request.port);
+  if (matches.length === 1) {
+    return {
+      ...request,
+      pid: matches[0].pid,
+      key: matches[0].key
+    };
+  }
+  const stoppable = matches.filter((server) => server.stopAllowed);
+  if (stoppable.length === 1) {
+    return {
+      ...request,
+      pid: stoppable[0].pid,
+      key: stoppable[0].key
+    };
+  }
+  if (matches.length > 1) {
+    const choices = matches.map((server) => `${server.key} ${server.processName || 'process'}`).join(', ');
+    throw new Error(`Port ${request.port} has multiple matches. Use pid:port. Matches: ${choices}`);
+  }
   return request;
 }
 
@@ -300,28 +404,28 @@ function printSummary(data, servers) {
     ['localhost', servers.filter((server) => server.scope === 'localhost').length],
     ['network', servers.filter((server) => server.scope === 'local-network').length],
     ['timers', summary.timers || 0],
-    ['scan', formatClock(data.scannedAt)]
+    ['scan', formatClock(data.scannedAt)],
+    ['strategy', data.strategyUsed || 'unknown'],
+    ['ms', Number(data.durationMs || 0)]
   ];
   console.log(cards.map(([label, value]) => `${gray(label)} ${bold(value)}`).join(gray('  |  ')));
 }
 
 function printMostUsedCommands(servers) {
   const target = servers.find((server) => server.stopAllowed) || servers[0];
-  const pid = target ? target.pid : '<pid>';
   const port = target ? target.port : '<port>';
-  const prefix = commandPrefix();
+  const targetToken = target ? String(target.port) : '<port>';
   const commands = [
-    ['close now', `${prefix} stop --pid ${pid} --port ${port}`],
-    ['close in 5m', `${prefix} timer set --pid ${pid} --port ${port} --seconds 300`],
-    ['timers', `${prefix} timer list`],
-    ['cancel timer', `${prefix} timer cancel <timer-id>`],
-    ['process due', `${prefix} timer run-due`],
-    ['json', `${prefix} list --json`]
+    ['stop', commandExample(`stop ${targetToken}`)],
+    ['5m', commandExample(`timer ${targetToken} 5m`)],
+    ['timers', commandExample('timer list')],
+    ['json', commandExample('list --json')],
+    ['full target', commandExample(`stop ${target ? target.key : '<pid:port>'}`)]
   ];
 
-  printSection('Most Used Commands');
+  printSection('Quick Commands');
   for (const [label, command] of commands) {
-    console.log(`  ${pad(gray(label), 12)} ${cyan(command)}`);
+    console.log(`  ${pad(gray(label), 11)} ${cyan(command)}`);
   }
 }
 
@@ -353,14 +457,17 @@ function printServers(data, options) {
       pad(server.processName, 20),
       bold(server.label || 'Local server')
     ].join(' '));
-    const addresses = (server.addresses || []).join(', ') || '--';
-    console.log(`  ${gray('key')} ${server.key}  ${gray('addr')} ${addresses}`);
-    if (server.commandLine) {
-      console.log(`  ${gray('cmd')} ${dim(truncate(server.commandLine, 110))}`);
+    if (options.verbose) {
+      const addresses = (server.addresses || []).join(', ') || '--';
+      console.log(`  ${gray('key')} ${server.key}  ${gray('addr')} ${addresses}`);
+      if (server.commandLine) {
+        console.log(`  ${gray('cmd')} ${dim(truncate(server.commandLine, 110))}`);
+      }
     }
   }
-  if (data.errors && data.errors.length) {
-    printWarn(`Scanner warnings: ${data.errors.join(' | ')}`);
+  const warnings = [...(data.warnings || []), ...(data.errors || [])];
+  if (warnings.length) {
+    printWarn(`Scanner warnings: ${warnings.join(' | ')}`);
   }
 }
 
@@ -398,35 +505,39 @@ async function confirm(options, message) {
   if (!process.stdin.isTTY) {
     throw new Error('Confirmation is required. Re-run with --yes to continue from a non-interactive shell.');
   }
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const rl = options.readline || readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
     const answer = await rl.question(`${yellow('[CONFIRM]')} ${message} ${gray('Type yes to continue: ')}`);
     return answer.trim().toLowerCase() === 'yes';
   } finally {
-    rl.close();
+    if (!options.readline) rl.close();
   }
 }
 
 async function commandList(options) {
-  const data = await manager.refreshScan();
+  const data = await getManager().refreshScan();
   printServers(data, options);
 }
 
 async function commandStop(options) {
-  const request = buildRequest(options);
-  if (!request.pid || !request.port) throw new Error('stop requires --pid and --port.');
+  const request = await resolveTarget(applyTargetToken(buildRequest(options), options.target));
+  if (!request.pid || !request.port) throw new Error('stop requires <port|pid:port>.');
   const ok = await confirm(options, `Stop PID ${request.pid} on port ${request.port}?`);
   if (!ok) {
     console.log(gray('Cancelled.'));
     return;
   }
+  const manager = getManager();
   const result = await manager.stopServer(request, 'manual');
   await manager.refreshScan().catch(() => {});
   if (options.json) {
     console.log(JSON.stringify(result, null, 2));
   } else if (result.ok) {
-    printHeader('Stop Request', 'A SIGTERM request was sent after re-validating the selected process.');
-    printSuccess(result.message);
+    if (result.status === 'signal-sent-still-running' || result.status === 'already-closed') {
+      printWarn(`${result.status}: ${result.message}`);
+    } else {
+      printSuccess(`${result.status || 'stopped'}: ${result.message}`);
+    }
     if (result.stopped) {
       console.log(`${gray('target')} ${cyan(`:${result.stopped.port}`)} ${gray('pid')} ${result.stopped.pid} ${gray('process')} ${result.stopped.processName}`);
     }
@@ -439,28 +550,48 @@ async function commandStop(options) {
 async function commandTimer(args, options) {
   const subcommand = args[1] || 'list';
   if (subcommand === 'list' || subcommand === 'ls') {
-    printTimers(manager.listTimers(), options.json);
+    printTimers(getManager().listTimers(), options.json);
     return;
   }
   if (subcommand === 'set' || subcommand === 'create') {
-    const request = buildRequest(options);
+    const request = await resolveTarget(applyTargetToken(buildRequest(options), args[2] || options.target));
+    if (args[3] !== undefined && request.seconds === undefined) request.seconds = parseDurationSeconds(args[3]);
     if (!request.pid || !request.port || !Number.isFinite(request.seconds)) {
-      throw new Error('timer set requires --pid, --port, and --seconds.');
+      throw new Error('timer set requires <port|pid:port> and <time>.');
     }
     const ok = await confirm(options, `Set a ${formatDuration(request.seconds)} auto-close timer for PID ${request.pid} on port ${request.port}?`);
     if (!ok) {
       console.log(gray('Cancelled.'));
       return;
     }
-    const result = await manager.createTimer(request);
+    const result = await getManager().createTimer(request);
     if (options.json) {
       console.log(JSON.stringify(result, null, 2));
     } else if (result.ok) {
-      printHeader('Timer Set', 'Auto-close timer saved for the selected local service.');
-      printSuccess(`Timer set for ${cyan(`:${result.timer.port}`)} in ${bold(formatDuration(result.timer.seconds))}.`);
-      console.log(`${gray('id')} ${result.timer.id}`);
-      console.log(`${gray('due')} ${result.timer.dueAt}`);
-      console.log(dim(`The desktop app or \`${commandPrefix()} timer run-due\` must be running to process due timers.`));
+      printSuccess(`Timer ${result.timer.id} set for ${cyan(`:${result.timer.port}`)} in ${bold(formatDuration(result.timer.seconds))}.`);
+    } else {
+      throw new Error(result.error || 'Could not create timer.');
+    }
+    if (!result.ok) process.exitCode = 1;
+    return;
+  }
+  if (/^:?\d+$/.test(subcommand) || /^\d+:\d+$/.test(subcommand)) {
+    const request = await resolveTarget(applyTargetToken(buildRequest(options), subcommand));
+    const duration = args[2] || options.seconds;
+    if (duration !== undefined && request.seconds === undefined) request.seconds = parseDurationSeconds(duration);
+    if (!request.pid || !request.port || !Number.isFinite(request.seconds)) {
+      throw new Error('timer requires <port|pid:port> and <time>.');
+    }
+    const ok = await confirm(options, `Set a ${formatDuration(request.seconds)} auto-close timer for PID ${request.pid} on port ${request.port}?`);
+    if (!ok) {
+      console.log(gray('Cancelled.'));
+      return;
+    }
+    const result = await getManager().createTimer(request);
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else if (result.ok) {
+      printSuccess(`Timer ${result.timer.id} set for ${cyan(`:${result.timer.port}`)} in ${bold(formatDuration(result.timer.seconds))}.`);
     } else {
       throw new Error(result.error || 'Could not create timer.');
     }
@@ -470,12 +601,11 @@ async function commandTimer(args, options) {
   if (subcommand === 'cancel' || subcommand === 'delete') {
     const id = args[2] || options.id;
     if (!id) throw new Error('timer cancel requires a timer id.');
-    const result = manager.cancelTimer(String(id));
+    const result = getManager().cancelTimer(String(id));
     if (options.json) {
       console.log(JSON.stringify(result, null, 2));
     } else if (result.ok) {
-      printHeader('Timer Cancelled', 'Pending timer was marked cancelled.');
-      printSuccess(result.timer.id);
+      printSuccess(`Cancelled timer ${result.timer.id}.`);
     } else {
       throw new Error(result.error || 'Could not cancel timer.');
     }
@@ -483,11 +613,10 @@ async function commandTimer(args, options) {
     return;
   }
   if (subcommand === 'run-due' || subcommand === 'process-due') {
-    await manager.processDueTimers();
+    await getManager().processDueTimers();
     if (options.json) {
       console.log(JSON.stringify({ ok: true }, null, 2));
     } else {
-      printHeader('Timer Sweep', 'Checked pending timers and processed anything due.');
       printSuccess('Due timers processed.');
     }
     return;
@@ -495,10 +624,11 @@ async function commandTimer(args, options) {
   throw new Error(`Unknown timer command: ${subcommand}`);
 }
 
-async function main() {
-  const parsed = parseArgv(process.argv.slice(2));
+async function dispatch(argv, context = {}) {
+  const parsed = parseArgv(argv);
   const args = parsed._;
-  const options = parsed.options;
+  const options = { ...parsed.options };
+  if (context.readline) options.readline = context.readline;
   const command = args[0] || 'list';
 
   if (options.help || command === 'help') {
@@ -513,16 +643,28 @@ async function main() {
     await commandList(options);
     return;
   }
-  if (command === 'stop') {
-    await commandStop(options);
+  if (command === 'stop' || command === 'close' || command === 'kill') {
+    await commandStop({ ...options, target: args[1] });
     return;
   }
   if (command === 'timers') {
-    printTimers(manager.listTimers(), options.json);
+    printTimers(getManager().listTimers(), options.json);
     return;
   }
   if (command === 'timer') {
     await commandTimer(args, options);
+    return;
+  }
+  if (command === 'cancel') {
+    await commandTimer(['timer', 'cancel', args[1]], options);
+    return;
+  }
+  if (command === 'run-due') {
+    await commandTimer(['timer', 'run-due'], options);
+    return;
+  }
+  if (command === 'in') {
+    await commandTimer(['timer', args[2], args[1]], options);
     return;
   }
   if (command === 'state-dir') {
@@ -537,7 +679,54 @@ async function main() {
   throw new Error(`Unknown command: ${command}`);
 }
 
-main().catch((error) => {
-  printError(error.message);
-  process.exitCode = 1;
-});
+async function runInteractiveShell() {
+  shellMode = true;
+  colorEnabled = shouldUseColor([]);
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  console.log(`${bold(cyan('GreyNOC'))} ${bold('Port Manager')} ${dim(`v${pkg.version}`)}`);
+  console.log(gray('Type help for commands, exit to quit.'));
+
+  try {
+    while (true) {
+      const input = await rl.question(`${cyan('gnp>')} `);
+      const trimmed = input.trim();
+      if (!trimmed) continue;
+      if (trimmed === 'exit' || trimmed === 'quit' || trimmed === 'q') break;
+      try {
+        const argv = splitCommandLine(trimmed);
+        await dispatch(argv, { readline: rl });
+        process.exitCode = 0;
+      } catch (error) {
+        printError(error.message);
+      }
+    }
+  } finally {
+    rl.close();
+    shellMode = false;
+  }
+}
+
+async function main(argv = process.argv.slice(2)) {
+  const parsed = parseArgv(argv);
+  const command = parsed._[0];
+  if (((!command && process.stdin.isTTY) || command === 'shell' || command === 'interactive') && !parsed.options.json) {
+    await runInteractiveShell();
+    return;
+  }
+  await dispatch(argv);
+}
+
+if (require.main === module) {
+  main().catch((error) => {
+    printError(error.message);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  parseArgv,
+  splitCommandLine,
+  buildRequest,
+  filterServers,
+  shouldUseColor
+};
