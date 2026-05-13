@@ -26,7 +26,13 @@ const elements = {
   notifyBtn: $('notifyBtn'),
   clearLogBtn: $('clearLogBtn'),
   activityLog: $('activityLog'),
-  rowTemplate: $('portRowTemplate')
+  rowTemplate: $('portRowTemplate'),
+  tabs: Array.from(document.querySelectorAll('[data-view]')),
+  views: {
+    monitor: $('monitorView'),
+    timers: $('timersView'),
+    activity: $('activityView')
+  }
 };
 
 function formatDuration(totalSeconds) {
@@ -79,6 +85,21 @@ function log(message, type = 'info') {
   elements.activityLog.prepend(item);
   while (elements.activityLog.children.length > 40) {
     elements.activityLog.removeChild(elements.activityLog.lastElementChild);
+  }
+}
+
+function switchView(viewName) {
+  if (!elements.views[viewName]) return;
+
+  for (const tab of elements.tabs) {
+    const isActive = tab.dataset.view === viewName;
+    tab.classList.toggle('is-active', isActive);
+    tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+  }
+
+  for (const [name, view] of Object.entries(elements.views)) {
+    view.hidden = name !== viewName;
+    view.classList.toggle('is-active', name === viewName);
   }
 }
 
@@ -186,13 +207,13 @@ function renderPorts() {
     const actions = row.querySelector('.actions-cell');
     const stopButton = document.createElement('button');
     stopButton.className = 'button small danger';
-    stopButton.textContent = 'Stop selected';
+    stopButton.textContent = 'Stop';
     stopButton.disabled = !server.stopAllowed;
     stopButton.addEventListener('click', () => stopServer(server));
 
     const timerButton = document.createElement('button');
     timerButton.className = 'button small secondary';
-    timerButton.textContent = 'Set timer';
+    timerButton.textContent = 'Timer';
     timerButton.disabled = !server.stopAllowed;
     timerButton.addEventListener('click', () => setTimer(server));
 
@@ -226,7 +247,7 @@ function renderTimers() {
     const meta = document.createElement('div');
     meta.className = 'timer-meta';
     const m1 = document.createElement('span');
-    m1.textContent = `PID ${timer.pid} · ${timer.processName}`;
+    m1.textContent = `PID ${timer.pid} - ${timer.processName}`;
     const m2 = document.createElement('span');
     m2.textContent = `Status: ${timer.status}`;
     const m3 = document.createElement('span');
@@ -237,7 +258,7 @@ function renderTimers() {
     if (isPending) {
       const cancel = document.createElement('button');
       cancel.className = 'button small ghost';
-      cancel.textContent = 'Cancel timer';
+      cancel.textContent = 'Cancel';
       cancel.addEventListener('click', () => cancelTimer(timer.id));
       card.appendChild(cancel);
     }
@@ -354,6 +375,9 @@ async function cancelTimer(timerId) {
 }
 
 function wireEvents() {
+  for (const tab of elements.tabs) {
+    tab.addEventListener('click', () => switchView(tab.dataset.view));
+  }
   elements.refreshBtn.addEventListener('click', () => loadPorts(false, true));
   elements.filterInput.addEventListener('input', renderPorts);
   elements.scopeFilter.addEventListener('change', renderPorts);

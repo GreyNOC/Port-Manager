@@ -9,134 +9,179 @@
   </head>
   <body>
     <main class="app-shell">
-      <section class="hero">
-        <div class="hero-text">
-          <p class="eyebrow"><span class="eyebrow-dot"></span> GreyNOC developer utility</p>
-          <h1>Port Manager</h1>
-          <p class="hero-copy">Detect new localhost and local dev servers, track how long they have been alive, and safely close selected ports now or on a timer.</p>
-        </div>
-        <div class="hero-actions">
-          <button id="refreshBtn" class="button primary">Refresh ports</button>
-          <button id="notifyBtn" class="button secondary">Enable alerts</button>
-        </div>
-      </section>
-
-      <section class="safety-strip" aria-label="Safety details">
-        <span><span class="dot dot-ok"></span> No network surface — IPC only</span>
-        <span><span class="dot dot-ok"></span> Manual confirmation before closing</span>
-        <span><span class="dot dot-ok"></span> Timers re-verify PID + port + command</span>
-        <span><span class="dot dot-ok"></span> Protected and non-owned processes are blocked</span>
-      </section>
-
-      <section class="stats-grid" aria-label="Port summary">
-        <article class="stat-card">
-          <span class="stat-label">Active local servers</span>
-          <strong id="activeCount">0</strong>
-        </article>
-        <article class="stat-card">
-          <span class="stat-label">New detected</span>
-          <strong id="newCount">0</strong>
-        </article>
-        <article class="stat-card">
-          <span class="stat-label">Auto-close timers</span>
-          <strong id="timerCount">0</strong>
-        </article>
-        <article class="stat-card">
-          <span class="stat-label">Last scan</span>
-          <strong id="lastScan">--</strong>
-        </article>
-      </section>
-
-      <section class="controls-panel">
-        <div class="field">
-          <label for="filterInput">Filter</label>
-          <input id="filterInput" type="search" placeholder="Search port, PID, process, command..." />
-        </div>
-        <div class="field small">
-          <label for="scopeFilter">Scope</label>
-          <select id="scopeFilter">
-            <option value="all">All local servers</option>
-            <option value="localhost">Localhost only</option>
-            <option value="local-network">Local network</option>
-          </select>
-        </div>
-        <div class="field small">
-          <label for="timerPreset">Timer</label>
-          <select id="timerPreset">
-            <option value="300">5 minutes</option>
-            <option value="900">15 minutes</option>
-            <option value="1800">30 minutes</option>
-            <option value="3600">1 hour</option>
-            <option value="7200">2 hours</option>
-            <option value="custom">Custom seconds</option>
-          </select>
-        </div>
-        <div class="field tiny" id="customTimerWrap" hidden>
-          <label for="customTimer">Seconds</label>
-          <input id="customTimer" type="number" min="5" max="86400" value="600" />
-        </div>
-      </section>
-
-      <section class="content-grid">
-        <section class="panel ports-panel">
-          <div class="panel-head">
-            <div>
-              <h2>Local servers</h2>
-              <p id="scanStatus"><span class="live-dot" aria-hidden="true"></span> Scanning every 3 seconds&hellip;</p>
-            </div>
+      <aside class="side-rail" aria-label="Workspace sections">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">GN</div>
+          <div class="brand-copy">
+            <span>GreyNOC</span>
+            <strong>Port Manager</strong>
           </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Status</th>
-                  <th>Port</th>
-                  <th>Process</th>
-                  <th>PID</th>
-                  <th>Alive</th>
-                  <th>Address</th>
-                  <th>Timer</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="portsBody">
-                <tr><td colspan="8" class="empty">No local servers found yet.</td></tr>
-              </tbody>
-            </table>
+        </div>
+
+        <nav class="side-tabs" role="tablist" aria-label="Port manager views">
+          <button id="monitorTab" class="side-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="monitorView" data-view="monitor">
+            <span class="tab-step">01</span>
+            <span class="tab-copy">
+              <strong>Monitor</strong>
+              <small>Servers</small>
+            </span>
+          </button>
+          <button id="timersTab" class="side-tab" type="button" role="tab" aria-selected="false" aria-controls="timersView" data-view="timers">
+            <span class="tab-step">02</span>
+            <span class="tab-copy">
+              <strong>Timers</strong>
+              <small>Auto-close</small>
+            </span>
+          </button>
+          <button id="activityTab" class="side-tab" type="button" role="tab" aria-selected="false" aria-controls="activityView" data-view="activity">
+            <span class="tab-step">03</span>
+            <span class="tab-copy">
+              <strong>Activity</strong>
+              <small>Events</small>
+            </span>
+          </button>
+        </nav>
+
+        <div class="rail-status" aria-label="Safety status">
+          <div class="status-row"><span class="dot dot-ok"></span><span>IPC only</span></div>
+          <div class="status-row"><span class="dot dot-ok"></span><span>Manual close</span></div>
+          <div class="status-row"><span class="dot dot-ok"></span><span>PID verified</span></div>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div class="title-block">
+            <p class="eyebrow">GreyNOC developer utility</p>
+            <h1>Local Port Operations</h1>
           </div>
+          <div class="topbar-actions">
+            <button id="refreshBtn" class="button primary">Refresh</button>
+            <button id="notifyBtn" class="button secondary">Alerts</button>
+          </div>
+        </header>
+
+        <section class="safety-strip" aria-label="Safety details">
+          <span><span class="dot dot-ok"></span> No network surface</span>
+          <span><span class="dot dot-ok"></span> Confirmation required</span>
+          <span><span class="dot dot-ok"></span> Timer re-checks PID, port, and command</span>
+          <span><span class="dot dot-ok"></span> Protected processes blocked</span>
         </section>
 
-        <aside class="panel timers-panel">
-          <div class="panel-head">
-            <div>
-              <h2>Timers</h2>
-              <p>Auto-close only selected local PID + port matches.</p>
+        <section class="stats-grid" aria-label="Port summary">
+          <article class="stat-card">
+            <span class="stat-label">Active servers</span>
+            <strong id="activeCount">0</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">New detected</span>
+            <strong id="newCount">0</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Auto-close timers</span>
+            <strong id="timerCount">0</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Last scan</span>
+            <strong id="lastScan">--</strong>
+          </article>
+        </section>
+
+        <section id="monitorView" class="view is-active" role="tabpanel" aria-labelledby="monitorTab">
+          <section class="controls-panel" aria-label="Filters and timer settings">
+            <div class="field">
+              <label for="filterInput">Filter</label>
+              <input id="filterInput" type="search" placeholder="Search port, PID, process, command..." />
             </div>
-          </div>
-          <div id="timersList" class="timers-list">
-            <div class="empty-card">No timers set.</div>
-          </div>
-        </aside>
-      </section>
+            <div class="field small">
+              <label for="scopeFilter">Scope</label>
+              <select id="scopeFilter">
+                <option value="all">All local servers</option>
+                <option value="localhost">Localhost only</option>
+                <option value="local-network">Local network</option>
+              </select>
+            </div>
+            <div class="field small">
+              <label for="timerPreset">Timer</label>
+              <select id="timerPreset">
+                <option value="300">5 minutes</option>
+                <option value="900">15 minutes</option>
+                <option value="1800">30 minutes</option>
+                <option value="3600">1 hour</option>
+                <option value="7200">2 hours</option>
+                <option value="custom">Custom seconds</option>
+              </select>
+            </div>
+            <div class="field tiny" id="customTimerWrap" hidden>
+              <label for="customTimer">Seconds</label>
+              <input id="customTimer" type="number" min="5" max="86400" value="600" />
+            </div>
+          </section>
 
-      <section class="panel log-panel">
-        <div class="panel-head">
-          <div>
-            <h2>Activity</h2>
-            <p>New detections, timer events, and close requests.</p>
-          </div>
-          <button id="clearLogBtn" class="button ghost">Clear</button>
-        </div>
-        <div id="activityLog" class="activity-log"></div>
-      </section>
+          <section class="panel ports-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Local Servers</h2>
+                <p id="scanStatus"><span class="live-dot" aria-hidden="true"></span> Scanning every 3 seconds...</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Port</th>
+                    <th>Process</th>
+                    <th>PID</th>
+                    <th>Alive</th>
+                    <th>Address</th>
+                    <th>Timer</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="portsBody">
+                  <tr><td colspan="8" class="empty">No local servers found yet.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
 
-      <footer class="app-footer">
-        <span>GreyNOC Port Manager</span>
-        <span class="dot-sep">&middot;</span>
-        <span>Local-only desktop utility</span>
-        <span class="dot-sep">&middot;</span>
-        <span>No telemetry, no network listeners</span>
-      </footer>
+        <section id="timersView" class="view" role="tabpanel" aria-labelledby="timersTab" hidden>
+          <section class="panel timers-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Timers</h2>
+                <p>Auto-close jobs bound to selected local PID and port matches.</p>
+              </div>
+            </div>
+            <div id="timersList" class="timers-list">
+              <div class="empty-card">No timers set.</div>
+            </div>
+          </section>
+        </section>
+
+        <section id="activityView" class="view" role="tabpanel" aria-labelledby="activityTab" hidden>
+          <section class="panel log-panel">
+            <div class="panel-head">
+              <div>
+                <h2>Activity</h2>
+                <p>Detections, timer events, and close requests.</p>
+              </div>
+              <button id="clearLogBtn" class="button ghost">Clear</button>
+            </div>
+            <div id="activityLog" class="activity-log"></div>
+          </section>
+        </section>
+
+        <footer class="app-footer">
+          <span>GreyNOC Port Manager</span>
+          <span class="dot-sep">/</span>
+          <span>Local-only desktop utility</span>
+          <span class="dot-sep">/</span>
+          <span>No telemetry</span>
+        </footer>
+      </section>
     </main>
 
     <template id="portRowTemplate">
